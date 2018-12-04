@@ -4,7 +4,7 @@ module ScoutApm
       attr_reader :context
 
       def initialize(context)
-        @context = context
+        @context   = context
         @installed = false
       end
 
@@ -21,7 +21,7 @@ module ScoutApm
 
         # Mongoid versions that use Moped should instrument Moped.
         if defined?(::Mongoid) and !defined?(::Moped)
-          logger.info "Instrumenting Mongoid 2.x"
+          logger.info "Instrumenting Mongoid"
           @installed = true
 
           ### OLD (2.x) mongoids
@@ -36,22 +36,24 @@ module ScoutApm
 
           ### See moped instrument for Moped driven deploys
 
-          ### 5.x Mongoid
-          if (mongoid_v5? || mongoid_v6?) && defined?(::Mongoid::Contextual::Mongo)
-            logger.info "Instrumenting Mongoid 5.x/6.x"
+          ### 5.x + Mongoid
+          logger.info "Checking mongo version: #{mongoid_version}, contextual mongo defined:#{defined?(::Mongoid::Contextual::Mongo)}"
+          if (mongoid_v5? || mongoid_v6? || mongoid_v7?) && defined?(::Mongoid::Contextual::Mongo)
+            logger.info "Instrumenting Mongoid #{mongoid_version}"
             # All the public methods from Mongoid::Contextual::Mongo.
             # TODO: Geo and MapReduce support (?). They are in other Contextual::* classes
             methods = [
-              :count, :delete, :destroy, :distinct, :each,
-              :explain, :find_first, :find_one_and_delete, :find_one_and_replace,
-              :find_one_and_update, :first, :geo_near, :initialize, :last,
-              :length, :limit, :map, :map_reduce, :pluck,
-              :skip, :sort, :update, :update_all,
+                :count, :delete, :destroy, :distinct, :each,
+                :explain, :find_first, :find_one_and_delete, :find_one_and_replace,
+                :find_one_and_update, :first, :geo_near, :initialize, :last,
+                :length, :limit, :map, :map_reduce, :pluck,
+                :skip, :sort, :update, :update_all,
             ]
             # :exists?,
 
             methods.each do |method|
               if ::Mongoid::Contextual::Mongo.method_defined?(method)
+                logger.info "Instrumenting mongo operation #{method}"
                 with_scout_instruments = %Q[
                 def #{method}_with_scout_instruments(*args, &block)
 
@@ -96,34 +98,33 @@ module ScoutApm
         end
       end
 
+      def mongoid_version
+        ::Mongoid::VERSION if defined?(::Mongoid::VERSION)
+      end
+
       def mongoid_v5?
-        if defined?(::Mongoid::VERSION)
-          ::Mongoid::VERSION =~ /\A5/
-        else
-          false
-        end
+        mongoid_version =~ /\A5/
       end
 
       def mongoid_v6?
-        if defined?(::Mongoid::VERSION)
-          ::Mongoid::VERSION =~ /\A6/
-        else
-          false
-        end
+        mongoid_version =~ /\A6/
       end
 
+      def mongoid_v7?
+        mongoid_version =~ /\A7/
+      end
 
       # Example of what a filter looks like: => {"founded"=>{"$gte"=>"1980-1-1"}, "name"=>{"$in"=>["Tool", "Deftones", "Melvins"]}}
       # Approach: find every leaf-node, clear it. inspect the whole thing when done.
       def self.anonymize_filter(filter)
         Hash[
-          filter.map do |k,v|
-            if v.is_a? Hash
-              [k, anonymize_filter(v)]
-            else
-              [k, "?"]
+            filter.map do |k, v|
+              if v.is_a? Hash
+                [k, anonymize_filter(v)]
+              else
+                [k, "?"]
+              end
             end
-          end
         ]
       end
     end
